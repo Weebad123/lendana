@@ -54,5 +54,12 @@ pub mod lendana {
         instructions::lender_operations::create_lending_order(ctx, amount_to_lend, loan_terms)?;
         Ok(())
     }
+
+    // MODIFY LENDER POSITION
+    pub fn modify_lender_position(ctx: Context<ModifyLenderPosition>, new_loan_terms: LoanTerms, add_lending_amount: u64) -> Result<()> {
+
+        instructions::lender_operations::modify_lender_position(ctx, new_loan_terms, add_lending_amount)?;
+        Ok(())
+    }
 }
 

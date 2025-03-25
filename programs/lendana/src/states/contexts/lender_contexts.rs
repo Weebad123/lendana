@@ -94,3 +94,75 @@ impl<'info> LenderPositionInfo<'info> {
         Ok(())
     }
 }
+
+
+
+
+// ---------- MODIFY LENDER POSITION EITHER VIA CHANGING LOAN TERMS OR TOPPING UP LENDING AMOUNT ----------
+#[derive(Accounts)]
+pub struct ModifyLenderPosition<'info> {
+
+    #[account(mut)]
+    pub lender: Signer<'info>,
+
+    pub token_to_lend: InterfaceAccount<'info, Mint>,
+
+    #[account(
+        mut,
+        associated_token::mint = token_to_lend,
+        associated_token::authority = lender,
+    )]
+    pub lender_ata: InterfaceAccount<'info, TokenAccount>,
+
+
+    // Token Escrow Account to track total lent tokens
+    #[account(
+        mut,
+        seeds = [b"token_escrow", token_to_lend.key().as_ref()],
+        bump = token_escrow.token_vault_bump
+    )]
+    pub token_escrow: Account<'info, LentTokenVault>,
+
+    // The Associated Token Esrow Vault
+    #[account(
+        mut,
+        associated_token::mint = token_to_lend,
+        associated_token::authority = token_escrow,
+    )]
+    pub token_vault: InterfaceAccount<'info, TokenAccount>,
+
+    // Lender Position
+    #[account(
+        mut,
+        seeds = [b"lender_position", lender.key().as_ref(), token_to_lend.key().as_ref()],
+        bump = lender_position.lender_position_bump,
+    )]
+    pub lender_position: Account<'info, LenderPosition>,
+
+    pub system_program: Program<'info, System>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+
+    pub associated_token_program: Program<'info, AssociatedToken>,
+}
+
+impl<'info> ModifyLenderPosition<'info> {
+    pub fn increase_lending_amount(&mut self, amount: u64) -> Result<()> {
+
+        // Let's CPI into the token transfer
+        let token_program =self.token_program.to_account_info();
+        
+        let cpi_accounts = TransferChecked {
+            from: self.lender_ata.to_account_info(),
+            to: self.token_vault.to_account_info(),
+            mint: self.token_to_lend.to_account_info(),
+            authority: self.lender.to_account_info(),
+        };
+        
+        let cpi_program = CpiContext::new(token_program, cpi_accounts);
+
+        transfer_checked(cpi_program, amount, self.token_to_lend.decimals)?;
+
+        Ok(())
+    }
+}

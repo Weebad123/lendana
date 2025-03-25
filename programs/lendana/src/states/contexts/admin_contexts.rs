@@ -179,7 +179,7 @@ pub struct WhitelistToken<'info> {
         init,
         payer = whitelister_role,
         space = 8 + 32 + 8 + 1 + 1,
-        seeds = [b"token_escrow", token_mint.key().as_ref()],
+        seeds = [b"token_escrow", mint_token.key().as_ref()],
         bump
     )]
     pub token_escrow: Account<'info, LentTokenVault>,

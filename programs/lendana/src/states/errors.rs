@@ -26,4 +26,7 @@ pub enum LendanaError {
 
     #[msg("Token Addition To Vault Overflow")]
     TokenAdditionOverflow,
+
+    #[msg("Cannot Modify An Already Matched Order")]
+    OrderAlreadyMatched,
 }

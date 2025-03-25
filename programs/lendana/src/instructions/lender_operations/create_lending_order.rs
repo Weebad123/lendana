@@ -22,7 +22,7 @@ pub fn create_lending_order(ctx: Context<LenderPositionInfo>, amount_to_lend: u6
     // Update The Token Escrow Data
     let token_escrow_data = &mut ctx.accounts.token_escrow;
     
-    token_escrow_data.total_lent_tokens.checked_add(amount_to_lend).ok_or(LendanaError::TokenAdditionOverflow)?;
+    token_escrow_data.total_lent_tokens = token_escrow_data.total_lent_tokens.checked_add(amount_to_lend).ok_or(LendanaError::TokenAdditionOverflow)?;
 
     // Update Lender Position
     let lender_position = &mut ctx.accounts.lender_position;
@@ -43,6 +43,7 @@ pub fn create_lending_order(ctx: Context<LenderPositionInfo>, amount_to_lend: u6
         lender_position_id: lender_position_id,
         lending_terms: loan_terms,
         is_position_active: true,
+        is_matched: false,
         lending_start: Clock::get()?.unix_timestamp,
         lender_position_bump: ctx.bumps.lender_position,
     });

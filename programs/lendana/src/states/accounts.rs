@@ -93,13 +93,15 @@ pub struct LenderPosition {
 
    pub is_position_active: bool,// 1 byte
 
+   pub is_matched: bool,// 1 byte
+
    pub lending_start: i64,// 8 bytes
 
    pub lender_position_bump: u8,// 1 byte
 
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, InitSpace)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, InitSpace, PartialEq)]
 pub struct LoanTerms {
 
    pub interest_rate: u64,

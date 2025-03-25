@@ -41,6 +41,11 @@ describe("lendana", () => {
   const lendanaAdmin = anchor.web3.Keypair.generate();
   const whitelister = anchor.web3.Keypair.generate();
   const lender1 = anchor.web3.Keypair.generate();
+  const lender2 = anchor.web3.Keypair.generate();
+
+  // Token Mints In our Testing
+  let usdcTokenMint: PublicKey;
+  let daiTokenMint: PublicKey;
 
   /** AIRDROP FUNCTION */
   async function airdropSol(provider, publicKey, amountInSol) {
@@ -63,8 +68,30 @@ describe("lendana", () => {
 
     await setupActors(
       provider,
-      [lendanaAdmin.publicKey, whitelister.publicKey, lender1.publicKey],
+      [
+        lendanaAdmin.publicKey,
+        whitelister.publicKey,
+        lender1.publicKey,
+        lender2.publicKey,
+      ],
       5
+    );
+
+    // Create Token Mints
+    usdcTokenMint = await createMint(
+      provider.connection,
+      whitelister,
+      whitelister.publicKey,
+      null,
+      6
+    );
+
+    daiTokenMint = await createMint(
+      provider.connection,
+      whitelister,
+      whitelister.publicKey,
+      null,
+      9
     );
   });
 
@@ -218,29 +245,12 @@ describe("lendana", () => {
       program.programId
     );
 
-    // Token Mints
-    // Let's Create The Mint token
-    const usdcTokenMint = await createMint(
-      provider.connection,
-      whitelister,
-      whitelister.publicKey,
-      null,
-      6
-    );
-
     // Token Escrow Vault PDA
     const [usdcTokenVaultPDA, usdcTokenEscrowVaultBump] =
       PublicKey.findProgramAddressSync(
         [Buffer.from("token_escrow"), usdcTokenMint.toBuffer()],
         program.programId
       );
-    /* Let's create the Associated Token Mint Vault
-    const tokenVault = await createAssociatedTokenAccount(
-      provider.connection,
-      whitelister,
-      usdcToken.publicKey,
-      usdcTokenVaultPDA
-    );*/
 
     const tokenVaultAddress = getAssociatedTokenAddressSync(
       usdcTokenMint,
@@ -276,6 +286,10 @@ describe("lendana", () => {
     const tokenExists = whitelistedRegistryData.tokensWhitelisted.some(
       (tokenPublicKey) => tokenPublicKey.equals(usdcTokenMint)
     );
+    const tokenVaultData = await getAccount(
+      provider.connection,
+      tokenVaultAddress
+    );
     expect(tokenExists).to.be.true;
     expect(whitelistedRegistryData.tokensWhitelisted.length).to.eq(1);
 
@@ -286,29 +300,15 @@ describe("lendana", () => {
     expect(usdcTokenVaultPDAData.lendingToken).deep.equal(usdcTokenMint);
     expect(usdcTokenVaultPDAData.totalLentTokens.toNumber()).to.eq(0);
     expect(usdcTokenVaultPDAData.isActive).to.be.true;
+
+    // Query The Associated Token Vault account balance to ensure it has no tokens
+    expect(Number(tokenVaultData.amount)).to.eq(0);
   });
 
   it("TEST 7:   ------------------- USER LENDS HIS TOKEN   ---------------------", async () => {
     /* + The User Got To Have Some Whitelisted Tokens already*/
     // Add this at the start of your test
-    // Token Mints
-    // Let's Create The Mint token
-    const usdcTokenMint = await createMint(
-      provider.connection,
-      whitelister,
-      whitelister.publicKey,
-      null,
-      6
-    );
 
-    /* Get Lender ATA, and mint Some usdcToken to Lender1
-    const lender1ATAaddress = getAssociatedTokenAddressSync(
-      usdcTokenMint,
-      lender1.publicKey,
-      true,
-      TOKEN_PROGRAM_ID,
-      ASSOCIATED_TOKEN_PROGRAM_ID
-    );*/
     const lender1ATAaddress = await getOrCreateAssociatedTokenAccount(
       provider.connection,
       lender1,
@@ -322,7 +322,8 @@ describe("lendana", () => {
       usdcTokenMint,
       lender1ATAaddress.address,
       whitelister.publicKey,
-      500 * 10 ** 6
+      500 * 10 ** 6,
+      [whitelister]
     );
 
     // Get PDAs
@@ -361,15 +362,6 @@ describe("lendana", () => {
         program.programId
       );
 
-    console.log("Lender1 PublicKey:", lender1.publicKey.toBase58());
-    console.log("Token Escrow PDA:", tokenEscrowPDA.toBase58());
-    console.log("Token Vault Address:", tokenVaultAddress.toBase58());
-    console.log("Lender Position PDA:", lender1PositionPDA.toBase58());
-    console.log(
-      "Lender Position Counter PDA:",
-      lenderPositionCounterPDA.toBase58()
-    );
-
     // Call The Lend token Instruction
     const loanTerms = {
       interestRate: new BN(500),
@@ -382,7 +374,7 @@ describe("lendana", () => {
         lender: lender1.publicKey,
         tokenToLend: usdcTokenMint,
         //@ts-ignore
-        lenderAta: lender1ATAaddress,
+        lenderAta: lender1ATAaddress.address,
         allWhitelistedTokens: globalWhitelistedTokensPDA,
         tokenEscrow: tokenEscrowPDA,
         tokenVault: tokenVaultAddress,
@@ -394,5 +386,213 @@ describe("lendana", () => {
       })
       .signers([lender1])
       .rpc();
+
+    // Let's Get The PDA Data and Validate The On-chain data
+    const lenderPositionData = await program.account.lenderPosition.fetch(
+      lender1PositionPDA
+    );
+    const tokenEscrowData = await program.account.lentTokenVault.fetch(
+      tokenEscrowPDA
+    );
+    const tokenVaultData = await getAccount(
+      provider.connection,
+      tokenVaultAddress
+    );
+
+    // Let's Verify The Lender Position
+    expect(lenderPositionData.lenderPubkey).to.deep.equal(lender1.publicKey);
+    expect(lenderPositionData.lendingToken).to.deep.equal(usdcTokenMint);
+    expect(lenderPositionData.isPositionActive).to.be.true;
+    expect(lenderPositionData.isMatched).to.be.false;
+    expect(lenderPositionData.lenderPositionId.toNumber()).to.eq(1);
+    expect(lenderPositionData.lendingAmount.toNumber()).to.eq(450 * 10 ** 6);
+    expect(lenderPositionData.interestAccumulated.toNumber()).to.eq(0);
+    expect(lenderPositionData.lendingTerms.interestRate.toNumber()).to.eq(500);
+    expect(lenderPositionData.lendingTerms.lendingDuration.toNumber()).to.eq(
+      7776000
+    );
+
+    // Let's Verify Token Escrow Data
+    expect(tokenEscrowData.isActive).to.be.true;
+    expect(tokenEscrowData.totalLentTokens.toNumber()).to.eq(450 * 10 ** 6);
+    expect(tokenEscrowData.lendingToken).to.deep.equal(usdcTokenMint);
+
+    // Let's Ensure Token Vault Receives The Lent Tokens By Checking its Balance
+    expect(Number(tokenVaultData.amount)).to.eq(450 * 10 ** 6);
+  });
+
+  it("TEST 8:  UNHAPPY SCENARIO  ------------- LENDER2 TRIES TO LEND A NON-WHITELISTED TOKEN SHOULD FAIL   ---------", async () => {
+    const lender2ATAaddress = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      lender2,
+      daiTokenMint,
+      lender2.publicKey
+    );
+
+    const userDaiToken = await mintTo(
+      provider.connection,
+      lender2,
+      daiTokenMint,
+      lender2ATAaddress.address,
+      whitelister.publicKey,
+      1000 * 10 ** 9,
+      [whitelister]
+    );
+
+    // Get PDAs
+    const [globalWhitelistedTokensPDA, globalWhitelistedTokensBump] =
+      PublicKey.findProgramAddressSync(
+        [Buffer.from("all_whitelisted_tokens")],
+        program.programId
+      );
+
+    const [lenderPositionCounterPDA, lenderPositionCounterBump] =
+      PublicKey.findProgramAddressSync(
+        [Buffer.from("lenders_position_id_counter")],
+        program.programId
+      );
+
+    const [tokenEscrowPDA, tokenEscrowBump] = PublicKey.findProgramAddressSync(
+      [Buffer.from("token_escrow"), daiTokenMint.toBuffer()],
+      program.programId
+    );
+
+    const tokenVaultAddress = getAssociatedTokenAddressSync(
+      daiTokenMint,
+      tokenEscrowPDA,
+      true,
+      TOKEN_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+
+    const [lender2PositionPDA, lender2PositionBump] =
+      PublicKey.findProgramAddressSync(
+        [
+          Buffer.from("lender_position"),
+          lender2.publicKey.toBuffer(),
+          daiTokenMint.toBuffer(),
+        ],
+        program.programId
+      );
+
+    // Call The Lend token Instruction
+    const loanTerms = {
+      interestRate: new BN(700),
+      lendingDuration: new BN(15552000),
+    };
+
+    try {
+      await program.methods
+        .lendToken(new BN(700 * 10 ** 9), loanTerms)
+        .accounts({
+          lender: lender2.publicKey,
+          tokenToLend: daiTokenMint,
+          //@ts-ignore
+          lenderAta: lender2ATAaddress.address,
+          allWhitelistedTokens: globalWhitelistedTokensPDA,
+          tokenEscrow: tokenEscrowPDA,
+          tokenVault: tokenVaultAddress,
+          lenderPosition: lender2PositionPDA,
+          lenderPositionIdCounter: lenderPositionCounterPDA,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([lender2])
+        .rpc();
+    } catch (err) {
+      expect(err.error.errorCode.code).to.equal("AccountNotInitialized");
+    }
+  });
+
+  //  -----------------                MODIFYING LENDING POSITION TESTS              ---------------------
+  it("TEST 9: ------------  LENDER1 TRIES TO MODIFY HIS LENDING POSITION  --------------", async () => {
+    // Get Required Accounts
+    const [tokenEscrowPDA, tokenEscrowBump] = PublicKey.findProgramAddressSync(
+      [Buffer.from("token_escrow"), usdcTokenMint.toBuffer()],
+      program.programId
+    );
+
+    const tokenVaultAddress = getAssociatedTokenAddressSync(
+      usdcTokenMint,
+      tokenEscrowPDA,
+      true,
+      TOKEN_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+
+    const [lender1PositionPDA, lender1PositionBump] =
+      PublicKey.findProgramAddressSync(
+        [
+          Buffer.from("lender_position"),
+          lender1.publicKey.toBuffer(),
+          usdcTokenMint.toBuffer(),
+        ],
+        program.programId
+      );
+
+    const lender1ATAaddress = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      lender1,
+      usdcTokenMint,
+      lender1.publicKey
+    );
+
+    // New Loan Terms
+    const newLoanTerms = {
+      interestRate: new BN(700),
+      lendingDuration: new BN(15552000),
+    };
+
+    // Let's Call The Modify Lender Position instruction
+    await program.methods
+      .modifyLenderPosition(newLoanTerms, new BN(35 * 10 ** 6))
+      .accounts({
+        lender: lender1.publicKey,
+        tokenToLend: usdcTokenMint,
+        //@ts-ignore
+        lenderAta: lender1ATAaddress.address,
+        tokenEscrow: tokenEscrowPDA,
+        tokenVault: tokenVaultAddress,
+        lenderPosition: lender1PositionPDA,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([lender1])
+      .rpc();
+
+    // Let's Get The PDA Data and Validate The On-chain data
+    const lenderPositionData = await program.account.lenderPosition.fetch(
+      lender1PositionPDA
+    );
+    const tokenEscrowData = await program.account.lentTokenVault.fetch(
+      tokenEscrowPDA
+    );
+    const tokenVaultData = await getAccount(
+      provider.connection,
+      tokenVaultAddress
+    );
+
+    // Let's Verify The Lender Position To Confirm If Changes Were Effected
+    expect(lenderPositionData.lenderPubkey).to.deep.equal(lender1.publicKey);
+    expect(lenderPositionData.lendingToken).to.deep.equal(usdcTokenMint);
+    expect(lenderPositionData.isPositionActive).to.be.true;
+    expect(lenderPositionData.isMatched).to.be.false;
+    expect(lenderPositionData.lenderPositionId.toNumber()).to.eq(1);
+    expect(lenderPositionData.lendingAmount.toNumber()).to.eq(485 * 10 ** 6);
+    expect(lenderPositionData.interestAccumulated.toNumber()).to.eq(0);
+    expect(lenderPositionData.lendingTerms.interestRate.toNumber()).to.eq(700);
+    expect(lenderPositionData.lendingTerms.lendingDuration.toNumber()).to.eq(
+      15552000
+    );
+
+    // Let's Verify Token Escrow Data
+    expect(tokenEscrowData.isActive).to.be.true;
+    expect(tokenEscrowData.totalLentTokens.toNumber()).to.eq(485 * 10 ** 6);
+    expect(tokenEscrowData.lendingToken).to.deep.equal(usdcTokenMint);
+
+    // Let's Ensure Token Vault Receives The Lent Tokens By Checking its Balance
+    expect(Number(tokenVaultData.amount)).to.eq(485 * 10 ** 6);
   });
 });

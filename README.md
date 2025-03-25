@@ -10,6 +10,11 @@
 - Lender should be able to withdraw the interest earned.
 - Lender should be able to cancel lending order, if no matching is found for a specified deadline.
 
+* Between When Lender Submits a Lending Order and When A Borrower Is Matched, the lent tokens would just be sitting
+  idly in the Token Vault; That is Not Capital Efficient.
+
+- for That reason, Until lender's order is matched, lender's lent tokens would be used in staking so lender can earn additional rewards
+
 * Specifies loan terms including the following struct:
   { + interest rate. + lending duration
   }>
