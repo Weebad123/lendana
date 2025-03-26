@@ -29,4 +29,10 @@ pub enum LendanaError {
 
     #[msg("Cannot Modify An Already Matched Order")]
     OrderAlreadyMatched,
+
+    #[msg("Only Owning Lender Can Call Function")]
+    UnauthorizedLender,
+
+    #[msg("Insufficient Lent Tokens In Vault")]
+    InsufficientLentTokens,
 }

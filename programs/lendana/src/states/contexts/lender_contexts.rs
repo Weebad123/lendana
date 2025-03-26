@@ -102,7 +102,10 @@ impl<'info> LenderPositionInfo<'info> {
 #[derive(Accounts)]
 pub struct ModifyLenderPosition<'info> {
 
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = lender.key() == lender_position.lender_pubkey @LendanaError::UnauthorizedLender,
+    )]
     pub lender: Signer<'info>,
 
     pub token_to_lend: InterfaceAccount<'info, Mint>,
@@ -162,6 +165,91 @@ impl<'info> ModifyLenderPosition<'info> {
         let cpi_program = CpiContext::new(token_program, cpi_accounts);
 
         transfer_checked(cpi_program, amount, self.token_to_lend.decimals)?;
+
+        Ok(())
+    }
+}
+
+
+
+
+// ---------- CANCEL LENDING ORDER ----------
+#[derive(Accounts)]
+pub struct CancelLendingOrder<'info> {
+
+    #[account(
+        mut,
+        constraint = lender.key() == lender_position.lender_pubkey @LendanaError::UnauthorizedLender,
+        constraint = lender_position.is_matched == false @LendanaError::OrderAlreadyMatched,
+    )]
+    pub lender: Signer<'info>,
+
+    pub token_to_lend: InterfaceAccount<'info, Mint>,
+
+    #[account(
+        mut,
+        associated_token::mint = token_to_lend,
+        associated_token::authority = lender,
+    )]
+    pub lender_ata: InterfaceAccount<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        seeds = [b"token_escrow", token_to_lend.key().as_ref()],
+        bump = token_escrow.token_vault_bump
+    )]
+    pub token_escrow: Account<'info, LentTokenVault>,
+
+    // The Associated Token Esrow Vault
+    #[account(
+        mut,
+        associated_token::mint = token_to_lend,
+        associated_token::authority = token_escrow,
+    )]
+    pub token_vault: InterfaceAccount<'info, TokenAccount>,
+
+    // Lender Position
+    #[account(
+        mut,
+        close = lender,
+        seeds = [b"lender_position", lender.key().as_ref(), token_to_lend.key().as_ref()],
+        bump = lender_position.lender_position_bump,
+    )]
+    pub lender_position: Account<'info, LenderPosition>,
+
+    pub system_program: Program<'info, System>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+
+    pub associated_token_program: Program<'info, AssociatedToken>,
+}
+
+impl<'info> CancelLendingOrder<'info> {
+    pub fn refund_tokens_to_lender(&mut self) -> Result<()> {
+
+        // Let's CPI into the token transfer
+        let token_program =self.token_program.to_account_info();
+        
+        let cpi_accounts = TransferChecked {
+            from: self.token_vault.to_account_info(),
+            to: self.lender_ata.to_account_info(),
+            mint: self.token_to_lend.to_account_info(),
+            authority: self.token_escrow.to_account_info(),
+        };
+
+        let token_to_refund = self.token_to_lend.key();
+
+        let seeds = &[
+            b"token_escrow", 
+            token_to_refund.as_ref(),
+            &[self.token_escrow.token_vault_bump]
+            ];
+
+        let signer_seeds = &[&seeds[..]];
+        
+        let cpi_program = CpiContext::new_with_signer(token_program, cpi_accounts, signer_seeds);
+
+        transfer_checked(cpi_program, self.lender_position.lending_amount, self.token_to_lend.decimals)?;
 
         Ok(())
     }

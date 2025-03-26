@@ -305,7 +305,7 @@ describe("lendana", () => {
     expect(Number(tokenVaultData.amount)).to.eq(0);
   });
 
-  it("TEST 7:   ------------------- USER LENDS HIS TOKEN   ---------------------", async () => {
+  it("TEST 7:   ------------------- LENDER1 AND LENDER2 LENDS THEIR WHITELISTED USDC TOKEN   ---------------------", async () => {
     /* + The User Got To Have Some Whitelisted Tokens already*/
     // Add this at the start of your test
 
@@ -316,13 +316,30 @@ describe("lendana", () => {
       lender1.publicKey
     );
 
-    const userUsdcToken = await mintTo(
+    const lenderUsdcToken = await mintTo(
       provider.connection,
       lender1,
       usdcTokenMint,
       lender1ATAaddress.address,
       whitelister.publicKey,
       500 * 10 ** 6,
+      [whitelister]
+    );
+
+    const lender2ATAaddress = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      lender2,
+      usdcTokenMint,
+      lender2.publicKey
+    );
+
+    const lender2UsdcToken = await mintTo(
+      provider.connection,
+      lender2,
+      usdcTokenMint,
+      lender2ATAaddress.address,
+      whitelister.publicKey,
+      700 * 10 ** 6,
       [whitelister]
     );
 
@@ -362,14 +379,30 @@ describe("lendana", () => {
         program.programId
       );
 
+    const [lender2PositionPDA, lender2PositionBump] =
+      PublicKey.findProgramAddressSync(
+        [
+          Buffer.from("lender_position"),
+          lender2.publicKey.toBuffer(),
+          usdcTokenMint.toBuffer(),
+        ],
+        program.programId
+      );
+
     // Call The Lend token Instruction
-    const loanTerms = {
+    const lender1LoanTerms = {
       interestRate: new BN(500),
       lendingDuration: new BN(7776000),
     };
 
+    const lender2LoanTerms = {
+      interestRate: new BN(300),
+      lendingDuration: new BN(2592000),
+    };
+
+    // Lender 1 Calls The Lend Token Instruction
     await program.methods
-      .lendToken(new BN(450 * 10 ** 6), loanTerms)
+      .lendToken(new BN(450 * 10 ** 6), lender1LoanTerms)
       .accounts({
         lender: lender1.publicKey,
         tokenToLend: usdcTokenMint,
@@ -387,9 +420,32 @@ describe("lendana", () => {
       .signers([lender1])
       .rpc();
 
+    // Lender 2 Calls The Lend Token Instruction
+    await program.methods
+      .lendToken(new BN(600 * 10 ** 6), lender2LoanTerms)
+      .accounts({
+        lender: lender2.publicKey,
+        tokenToLend: usdcTokenMint,
+        //@ts-ignore
+        lenderAta: lender2ATAaddress.address,
+        allWhitelistedTokens: globalWhitelistedTokensPDA,
+        tokenEscrow: tokenEscrowPDA,
+        tokenVault: tokenVaultAddress,
+        lenderPosition: lender2PositionPDA,
+        lenderPositionIdCounter: lenderPositionCounterPDA,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([lender2])
+      .rpc();
+
     // Let's Get The PDA Data and Validate The On-chain data
-    const lenderPositionData = await program.account.lenderPosition.fetch(
+    const lender1PositionData = await program.account.lenderPosition.fetch(
       lender1PositionPDA
+    );
+    const lender2PositionData = await program.account.lenderPosition.fetch(
+      lender2PositionPDA
     );
     const tokenEscrowData = await program.account.lentTokenVault.fetch(
       tokenEscrowPDA
@@ -399,29 +455,42 @@ describe("lendana", () => {
       tokenVaultAddress
     );
 
-    // Let's Verify The Lender Position
-    expect(lenderPositionData.lenderPubkey).to.deep.equal(lender1.publicKey);
-    expect(lenderPositionData.lendingToken).to.deep.equal(usdcTokenMint);
-    expect(lenderPositionData.isPositionActive).to.be.true;
-    expect(lenderPositionData.isMatched).to.be.false;
-    expect(lenderPositionData.lenderPositionId.toNumber()).to.eq(1);
-    expect(lenderPositionData.lendingAmount.toNumber()).to.eq(450 * 10 ** 6);
-    expect(lenderPositionData.interestAccumulated.toNumber()).to.eq(0);
-    expect(lenderPositionData.lendingTerms.interestRate.toNumber()).to.eq(500);
-    expect(lenderPositionData.lendingTerms.lendingDuration.toNumber()).to.eq(
+    // Let's Verify The Lender1 Position
+    expect(lender1PositionData.lenderPubkey).to.deep.equal(lender1.publicKey);
+    expect(lender1PositionData.lendingToken).to.deep.equal(usdcTokenMint);
+    expect(lender1PositionData.isPositionActive).to.be.true;
+    expect(lender1PositionData.isMatched).to.be.false;
+    expect(lender1PositionData.lenderPositionId.toNumber()).to.eq(1);
+    expect(lender1PositionData.lendingAmount.toNumber()).to.eq(450 * 10 ** 6);
+    expect(lender1PositionData.interestAccumulated.toNumber()).to.eq(0);
+    expect(lender1PositionData.lendingTerms.interestRate.toNumber()).to.eq(500);
+    expect(lender1PositionData.lendingTerms.lendingDuration.toNumber()).to.eq(
       7776000
+    );
+
+    // Let's Verify The Lender2 Position
+    expect(lender2PositionData.lenderPubkey).to.deep.equal(lender2.publicKey);
+    expect(lender2PositionData.lendingToken).to.deep.equal(usdcTokenMint);
+    expect(lender2PositionData.isPositionActive).to.be.true;
+    expect(lender2PositionData.isMatched).to.be.false;
+    expect(lender2PositionData.lenderPositionId.toNumber()).to.eq(2);
+    expect(lender2PositionData.lendingAmount.toNumber()).to.eq(600 * 10 ** 6);
+    expect(lender2PositionData.interestAccumulated.toNumber()).to.eq(0);
+    expect(lender2PositionData.lendingTerms.interestRate.toNumber()).to.eq(300);
+    expect(lender2PositionData.lendingTerms.lendingDuration.toNumber()).to.eq(
+      2592000
     );
 
     // Let's Verify Token Escrow Data
     expect(tokenEscrowData.isActive).to.be.true;
-    expect(tokenEscrowData.totalLentTokens.toNumber()).to.eq(450 * 10 ** 6);
+    expect(tokenEscrowData.totalLentTokens.toNumber()).to.eq(1050 * 10 ** 6);
     expect(tokenEscrowData.lendingToken).to.deep.equal(usdcTokenMint);
 
     // Let's Ensure Token Vault Receives The Lent Tokens By Checking its Balance
-    expect(Number(tokenVaultData.amount)).to.eq(450 * 10 ** 6);
+    expect(Number(tokenVaultData.amount)).to.eq(1050 * 10 ** 6);
   });
 
-  it("TEST 8:  UNHAPPY SCENARIO  ------------- LENDER2 TRIES TO LEND A NON-WHITELISTED TOKEN SHOULD FAIL   ---------", async () => {
+  it("TEST 8:  UNHAPPY SCENARIO  ------------- LENDER2 TRIES TO LEND A NON-WHITELISTED TOKEN (daiTokenMint) SHOULD FAIL   ---------", async () => {
     const lender2ATAaddress = await getOrCreateAssociatedTokenAccount(
       provider.connection,
       lender2,
@@ -589,10 +658,97 @@ describe("lendana", () => {
 
     // Let's Verify Token Escrow Data
     expect(tokenEscrowData.isActive).to.be.true;
-    expect(tokenEscrowData.totalLentTokens.toNumber()).to.eq(485 * 10 ** 6);
+    expect(tokenEscrowData.totalLentTokens.toNumber()).to.eq(1085 * 10 ** 6);
     expect(tokenEscrowData.lendingToken).to.deep.equal(usdcTokenMint);
 
     // Let's Ensure Token Vault Receives The Lent Tokens By Checking its Balance
+    expect(Number(tokenVaultData.amount)).to.eq(1085 * 10 ** 6);
+  });
+
+  // -------------------- CANCEL A LENDING ORDER TESTINGS -------------------------------
+  it("TEST 10: -------------- LENDER2 CANCELS HIS LENDING ORDER  --------------", async () => {
+    // Get Required Accounts
+    const [tokenEscrowPDA, tokenEscrowBump] = PublicKey.findProgramAddressSync(
+      [Buffer.from("token_escrow"), usdcTokenMint.toBuffer()],
+      program.programId
+    );
+
+    const tokenVaultAddress = getAssociatedTokenAddressSync(
+      usdcTokenMint,
+      tokenEscrowPDA,
+      true,
+      TOKEN_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+
+    const lender2ATAaddress = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      lender2,
+      usdcTokenMint,
+      lender2.publicKey
+    );
+    // Let's Check Lender2 balance prior to cancelling the order
+    const lender2ATADataBeforeCancel = await getAccount(
+      provider.connection,
+      lender2ATAaddress.address
+    );
+    expect(Number(lender2ATADataBeforeCancel.amount)).to.eq(100 * 10 ** 6);
+
+    const [lender2PositionPDA, lender2PositionBump] =
+      PublicKey.findProgramAddressSync(
+        [
+          Buffer.from("lender_position"),
+          lender2.publicKey.toBuffer(),
+          usdcTokenMint.toBuffer(),
+        ],
+        program.programId
+      );
+
+    // Let's call the Cancel Order Instruction
+    await program.methods
+      .cancelLendingOrder()
+      .accounts({
+        lender: lender2.publicKey,
+        tokenToLend: usdcTokenMint,
+        //@ts-ignore
+        lenderAta: lender2ATAaddress.address,
+        tokenEscrow: tokenEscrowPDA,
+        tokenVault: tokenVaultAddress,
+        lenderPosition: lender2PositionPDA,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([lender2])
+      .rpc();
+
+    // Let's Make Assertions and Validations
+
+    const tokenEscrowData = await program.account.lentTokenVault.fetch(
+      tokenEscrowPDA
+    );
+    const tokenVaultData = await getAccount(
+      provider.connection,
+      tokenVaultAddress
+    );
+    // Check if Lender2 was refunded his lent token
+    const lender2ATADataAfterCancel = await getAccount(
+      provider.connection,
+      lender2ATAaddress.address
+    );
+    expect(Number(lender2ATADataAfterCancel.amount)).to.eq(700 * 10 ** 6);
+
+    // Check if TokenEscrow updates the total lent tokens after a cancelling order
+    expect(tokenEscrowData.totalLentTokens.toNumber()).to.eq(485 * 10 ** 6);
+
+    // Check If Token Vault Balance Was Reduced After Cancelling Order
     expect(Number(tokenVaultData.amount)).to.eq(485 * 10 ** 6);
+
+    // Now, i will use the getAccountInfo function on the lender2PositionPDA pda, and if it's indeed close,
+    // solana runtime will return a null
+    const lender2PositionData = await provider.connection.getAccountInfo(
+      lender2PositionPDA
+    );
+    expect(lender2PositionData).to.eq(null);
   });
 });

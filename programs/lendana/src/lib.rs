@@ -61,5 +61,12 @@ pub mod lendana {
         instructions::lender_operations::modify_lender_position(ctx, new_loan_terms, add_lending_amount)?;
         Ok(())
     }
+
+    // CANCEL LENDING ORDER
+    pub fn cancel_lending_order(ctx: Context<CancelLendingOrder>) -> Result<()> {
+
+        instructions::lender_operations::cancel_lending_order(ctx)?;
+        Ok(())
+    }
 }
 
