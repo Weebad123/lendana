@@ -35,4 +35,28 @@ pub enum LendanaError {
 
     #[msg("Insufficient Lent Tokens In Vault")]
     InsufficientLentTokens,
+
+    #[msg("Lending Order Has Not Been Matched Yet")]
+    OrderNotMatched,
+
+    #[msg("Borrowing Same Token Not Allowed")]
+    BorrowingSameToken,
+
+    #[msg("Specified Borrowing Token Does Not Match Its Token Mint")]
+    MismatchBorrowToken,
+
+    #[msg("Specified Collateral Token Does Not Match Its Token Mint")]
+    MismatchCollateralToken,
+
+    #[msg("Token Price Feeds Can Only Be Updated By Authorized Role")]
+    UnauthorizedPriceUpdater,
+
+    #[msg("Token Already Has A Price Feed In Registry")]
+    TokenPriceAlreadyExists,
+
+    #[msg("Token Price Feed ID Not Found In Registry")]
+    PriceFeedIDNotFound,
+
+    #[msg("Getting Collateral Required For Borrowing Fails")]
+    GetCollateralError,
 }

@@ -33,13 +33,13 @@ pub struct LenderPositionInfo<'info> {
     )]
     pub all_whitelisted_tokens: Account<'info, AllWhitelistedTokens>,
 
-    // Token Escrow Account to track total lent tokens
+    // Token Escrow Account to track total lent and borrowed tokens
     #[account(
         mut,
         seeds = [b"token_escrow", token_to_lend.key().as_ref()],
         bump = token_escrow.token_vault_bump
     )]
-    pub token_escrow: Account<'info, LentTokenVault>,
+    pub token_escrow: Account<'info, LentBorrowedTokenEscrow>,
 
     // The Associated Token Esrow Vault
     #[account(
@@ -124,7 +124,7 @@ pub struct ModifyLenderPosition<'info> {
         seeds = [b"token_escrow", token_to_lend.key().as_ref()],
         bump = token_escrow.token_vault_bump
     )]
-    pub token_escrow: Account<'info, LentTokenVault>,
+    pub token_escrow: Account<'info, LentBorrowedTokenEscrow>,
 
     // The Associated Token Esrow Vault
     #[account(
@@ -198,7 +198,7 @@ pub struct CancelLendingOrder<'info> {
         seeds = [b"token_escrow", token_to_lend.key().as_ref()],
         bump = token_escrow.token_vault_bump
     )]
-    pub token_escrow: Account<'info, LentTokenVault>,
+    pub token_escrow: Account<'info, LentBorrowedTokenEscrow>,
 
     // The Associated Token Esrow Vault
     #[account(
@@ -253,4 +253,55 @@ impl<'info> CancelLendingOrder<'info> {
 
         Ok(())
     }
+}
+
+
+/* --------------------- WITHDRAW OF ACCUMULATED INTERESTS   --------------------- */
+#[derive(Accounts)]
+pub struct WithdrawLendingInterest<'info> {
+    #[account(
+        mut,
+        constraint = lender.key() == lender_position.lender_pubkey @LendanaError::UnauthorizedLender,
+        constraint = lender_position.is_matched == true @LendanaError::OrderNotMatched,
+    )]
+    pub lender: Signer<'info>,
+
+    pub token_to_lend: InterfaceAccount<'info, Mint>,
+
+    #[account(
+        mut,
+        associated_token::mint = token_to_lend,
+        associated_token::authority = lender,
+    )]
+    pub lender_ata: InterfaceAccount<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        seeds = [b"token_escrow", token_to_lend.key().as_ref()],
+        bump = token_escrow.token_vault_bump
+    )]
+    pub token_escrow: Account<'info, LentBorrowedTokenEscrow>,
+
+    // The Associated Token Esrow Vault
+    #[account(
+        mut,
+        associated_token::mint = token_to_lend,
+        associated_token::authority = token_escrow,
+    )]
+    pub token_vault: InterfaceAccount<'info, TokenAccount>,
+
+    // Lender Position
+    #[account(
+        mut,
+        close = lender,
+        seeds = [b"lender_position", lender.key().as_ref(), token_to_lend.key().as_ref()],
+        bump = lender_position.lender_position_bump,
+    )]
+    pub lender_position: Account<'info, LenderPosition>,
+
+    pub system_program: Program<'info, System>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+
+    pub associated_token_program: Program<'info, AssociatedToken>,
 }

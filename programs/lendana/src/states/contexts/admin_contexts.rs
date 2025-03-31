@@ -95,7 +95,7 @@ pub struct InitializeWhiteLister<'info> {
 
 /* A Global Container Of Whitelisted Tokens */
 #[derive(Accounts)]
-pub struct GlobalWhitelistedTokensAndPositionCounters<'info> {
+pub struct GlobalWhitelistedTokensPositionCountersAndPriceRegistry<'info> {
     // Signer ought to be whitelister
     #[account(
         mut,
@@ -140,6 +140,26 @@ pub struct GlobalWhitelistedTokensAndPositionCounters<'info> {
     )]
     pub borrowers_position_id_counter: Account<'info, BorrowerPositionIDCounter>,
 
+    // Token Price Feeds Registry
+    #[account(
+        init,
+        payer = whitelister_role,
+        seeds = [b"price_feed_registry"],
+        bump,
+        space = 8 + TokenPriceFeedRegistry::INIT_SPACE,
+    )]
+    pub tokens_price_feed_registry: Account<'info, TokenPriceFeedRegistry>,
+
+    // SOL COLLATERAL PDA VAULT
+    #[account(
+        init,
+        payer = whitelister_role,
+        seeds = [b"sol_collateral_vault"],
+        bump,
+        space = 8 + SolCollateralVault::INIT_SPACE,
+    )]
+    pub sol_collateral_vault: Account<'info, SolCollateralVault>,
+
     pub system_program: Program<'info, System>,
 }
 /** TOKEN WHITELISTING OPERATION */
@@ -178,11 +198,11 @@ pub struct WhitelistToken<'info> {
     #[account(
         init,
         payer = whitelister_role,
-        space = 8 + 32 + 8 + 1 + 1,
+        space = 8 + 32 + 8 + 8 + 1 + 1,
         seeds = [b"token_escrow", mint_token.key().as_ref()],
         bump
     )]
-    pub token_escrow: Account<'info, LentTokenVault>,
+    pub token_escrow: Account<'info, LentBorrowedTokenEscrow>,
 
     // The Associated Token Esrow Vault
     #[account(
@@ -199,4 +219,42 @@ pub struct WhitelistToken<'info> {
     pub associated_token_program: Program<'info, AssociatedToken>,
 
     pub token_program: Interface<'info, TokenInterface>,
+}
+
+
+/* ADD A WHITELISTED TOKEN PRICE FEED MAPPING */
+#[derive(Accounts)]
+pub struct AddTokenPriceMapping<'info> {
+
+    #[account(
+        mut,
+        constraint = whitelister.key() == tokens_price_feed_registry.authority @LendanaError::UnauthorizedPriceUpdater,
+    )]
+    pub whitelister: Signer<'info>,
+
+    // Token Price Registry
+    #[account(
+        mut,
+        seeds = [b"price_feed_registry"],
+        bump = tokens_price_feed_registry.registry_bump
+    )]
+    pub tokens_price_feed_registry: Account<'info, TokenPriceFeedRegistry>,
+}
+
+impl<'info> AddTokenPriceMapping<'info> {
+    // Method To Add Price Feed
+    pub fn add_token_price_to_registry(&mut self, token_mint: Pubkey, price_feed_id_hex: String) -> Result<()> {
+
+        let token_price_registry =&mut self.tokens_price_feed_registry;
+
+        // Check if Price Mapping For Specified Token Does Not Exist
+        if token_price_registry.token_price_mapping.iter().any(|m| m.token_mint == token_mint) {
+            return err!(LendanaError::TokenPriceAlreadyExists);
+        }
+
+        // Let's Put This Token Price Feed Id into The Registry
+        let price_feed_id = price_feed_id_hex.to_string();
+        token_price_registry.token_price_mapping.push(TokenPriceMapping { token_mint, price_feed_id});
+        Ok(())
+    }
 }

@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-use crate::states::{contexts::*, errors::*};
+use crate::states::contexts::*;
 
 
 pub fn initialize_trusted_entities(ctx: Context<InitializeTrustedRoles>) -> Result<()> {

@@ -7,11 +7,14 @@ import {
   LAMPORTS_PER_SOL,
   PublicKey,
   SystemProgram,
+  Transaction,
+  TransactionInstruction,
 } from "@solana/web3.js";
 import {
   TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
+  NATIVE_MINT,
   getOrCreateAssociatedTokenAccount,
   createAssociatedTokenAccount,
   getAssociatedTokenAddressSync,
@@ -23,6 +26,7 @@ import {
 import { publicKey } from "@coral-xyz/anchor/dist/cjs/utils";
 import { expect } from "chai";
 import { BN } from "bn.js";
+import { HermesClient } from "@pythnetwork/hermes-client";
 
 describe("lendana", () => {
   // Configure the client to use the local cluster.
@@ -36,17 +40,34 @@ describe("lendana", () => {
   const TOKEN_PROGRAM: typeof TOKEN_2022_PROGRAM_ID | typeof TOKEN_PROGRAM_ID =
     TOKEN_2022_PROGRAM_ID;
 
+  // Price Update Client
+  const priceServiceConnection = new HermesClient(
+    "https://hermes.pyth.network/",
+    {}
+  );
+
   // Actors In The System
   const deployer = provider.wallet;
   const lendanaAdmin = anchor.web3.Keypair.generate();
   const whitelister = anchor.web3.Keypair.generate();
   const lender1 = anchor.web3.Keypair.generate();
   const lender2 = anchor.web3.Keypair.generate();
+  const borrower1 = anchor.web3.Keypair.generate();
+  const borrower2 = anchor.web3.Keypair.generate();
+  const borrower3 = anchor.web3.Keypair.generate();
 
   // Token Mints In our Testing
   let usdcTokenMint: PublicKey;
   let daiTokenMint: PublicKey;
+  let ethTokenMint: PublicKey;
+  const solMint = NATIVE_MINT;
 
+  // Price Feed IDs
+  // Define the constants for the price Feed ID hex
+  const usdcTokenPriceFeedIdHex =
+    "0xeaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a";
+  const solMintPriceFeedIdHex =
+    "0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d";
   /** AIRDROP FUNCTION */
   async function airdropSol(provider, publicKey, amountInSol) {
     const airdropSig = await provider.connection.requestAirdrop(
@@ -77,6 +98,12 @@ describe("lendana", () => {
       5
     );
 
+    await setupActors(
+      provider,
+      [borrower1.publicKey, borrower2.publicKey, borrower3.publicKey],
+      50
+    );
+
     // Create Token Mints
     usdcTokenMint = await createMint(
       provider.connection,
@@ -92,6 +119,14 @@ describe("lendana", () => {
       whitelister.publicKey,
       null,
       9
+    );
+
+    ethTokenMint = await createMint(
+      provider.connection,
+      whitelister,
+      whitelister.publicKey,
+      null,
+      18
     );
   });
 
@@ -203,10 +238,25 @@ describe("lendana", () => {
         program.programId
       );
 
+    const [priceFeedsRegistryPDA, priceFeedsRegistryBump] =
+      PublicKey.findProgramAddressSync(
+        [Buffer.from("price_feed_registry")],
+        program.programId
+      );
+
+    const [solCollateralVaultPDA, solCollateralVaultBump] =
+      PublicKey.findProgramAddressSync(
+        [Buffer.from("sol_collateral_vault")],
+        program.programId
+      );
+
     await program.methods
-      .initWhitelistedRegistryAndCounters()
+      .initRegistriesAndCounters()
       .accounts({
         whitelisterRole: whitelister.publicKey,
+        //@ts-ignore
+        tokensPriceFeedRegistry: priceFeedsRegistryPDA,
+        sol_collateral_vault: solCollateralVaultPDA,
       })
       .signers([whitelister])
       .rpc();
@@ -224,12 +274,22 @@ describe("lendana", () => {
       await program.account.borrowerPositionIdCounter.fetch(
         borrowerPositionCounterPDA
       );
+    const priceFeedsRegistryData =
+      await program.account.tokenPriceFeedRegistry.fetch(priceFeedsRegistryPDA);
+    const solCollateralVaultData =
+      await program.account.solCollateralVault.fetch(solCollateralVaultPDA);
 
     expect(whitelistedRegistryData.tokensWhitelisted.length).to.eq(0);
     expect(lendersPositionsData.lendersCurrentPositionId.toNumber()).to.eq(0);
     expect(borrowersPositionsData.borrowersCurrentPositionId.toNumber()).to.eq(
       0
     );
+    expect(priceFeedsRegistryData.tokenPriceMapping.length).to.eq(0);
+    expect(priceFeedsRegistryData.authority.toBuffer()).to.deep.equal(
+      whitelister.publicKey.toBuffer()
+    );
+    expect(solCollateralVaultData.vaultBalance.toNumber()).to.eq(0);
+    expect(solCollateralVaultData.isActive).to.be.true;
   });
 
   it("TEST 6:  ----------- WHITELISTING A TOKEN ADDRESS ----------", async () => {
@@ -294,10 +354,11 @@ describe("lendana", () => {
     expect(whitelistedRegistryData.tokensWhitelisted.length).to.eq(1);
 
     // Query The Associated Token Escrow Vault creation
-    const usdcTokenVaultPDAData = await program.account.lentTokenVault.fetch(
-      usdcTokenVaultPDA
+    const usdcTokenVaultPDAData =
+      await program.account.lentBorrowedTokenEscrow.fetch(usdcTokenVaultPDA);
+    expect(usdcTokenVaultPDAData.lendingBorrowingToken).deep.equal(
+      usdcTokenMint
     );
-    expect(usdcTokenVaultPDAData.lendingToken).deep.equal(usdcTokenMint);
     expect(usdcTokenVaultPDAData.totalLentTokens.toNumber()).to.eq(0);
     expect(usdcTokenVaultPDAData.isActive).to.be.true;
 
@@ -447,7 +508,7 @@ describe("lendana", () => {
     const lender2PositionData = await program.account.lenderPosition.fetch(
       lender2PositionPDA
     );
-    const tokenEscrowData = await program.account.lentTokenVault.fetch(
+    const tokenEscrowData = await program.account.lentBorrowedTokenEscrow.fetch(
       tokenEscrowPDA
     );
     const tokenVaultData = await getAccount(
@@ -484,7 +545,7 @@ describe("lendana", () => {
     // Let's Verify Token Escrow Data
     expect(tokenEscrowData.isActive).to.be.true;
     expect(tokenEscrowData.totalLentTokens.toNumber()).to.eq(1050 * 10 ** 6);
-    expect(tokenEscrowData.lendingToken).to.deep.equal(usdcTokenMint);
+    expect(tokenEscrowData.lendingBorrowingToken).to.deep.equal(usdcTokenMint);
 
     // Let's Ensure Token Vault Receives The Lent Tokens By Checking its Balance
     expect(Number(tokenVaultData.amount)).to.eq(1050 * 10 ** 6);
@@ -635,7 +696,7 @@ describe("lendana", () => {
     const lenderPositionData = await program.account.lenderPosition.fetch(
       lender1PositionPDA
     );
-    const tokenEscrowData = await program.account.lentTokenVault.fetch(
+    const tokenEscrowData = await program.account.lentBorrowedTokenEscrow.fetch(
       tokenEscrowPDA
     );
     const tokenVaultData = await getAccount(
@@ -659,7 +720,7 @@ describe("lendana", () => {
     // Let's Verify Token Escrow Data
     expect(tokenEscrowData.isActive).to.be.true;
     expect(tokenEscrowData.totalLentTokens.toNumber()).to.eq(1085 * 10 ** 6);
-    expect(tokenEscrowData.lendingToken).to.deep.equal(usdcTokenMint);
+    expect(tokenEscrowData.lendingBorrowingToken).to.deep.equal(usdcTokenMint);
 
     // Let's Ensure Token Vault Receives The Lent Tokens By Checking its Balance
     expect(Number(tokenVaultData.amount)).to.eq(1085 * 10 ** 6);
@@ -724,7 +785,7 @@ describe("lendana", () => {
 
     // Let's Make Assertions and Validations
 
-    const tokenEscrowData = await program.account.lentTokenVault.fetch(
+    const tokenEscrowData = await program.account.lentBorrowedTokenEscrow.fetch(
       tokenEscrowPDA
     );
     const tokenVaultData = await getAccount(
@@ -750,5 +811,193 @@ describe("lendana", () => {
       lender2PositionPDA
     );
     expect(lender2PositionData).to.eq(null);
+  });
+
+  // -------------------    ADD A PRICE FEED ID FOR A WHITELISTED TOKEN      -------------------------
+  it("TEST 11:  ----------------- ADDING A PRICE FEED ID FOR USDC WHITELISTED TOKEN  ------------------", async () => {
+    const [priceFeedsRegistryPDA, priceFeedsRegistryBump] =
+      PublicKey.findProgramAddressSync(
+        [Buffer.from("price_feed_registry")],
+        program.programId
+      );
+    // Call The Actual Instruction
+    await program.methods
+      .addPrice(usdcTokenMint, usdcTokenPriceFeedIdHex)
+      .accounts({
+        whitelister: whitelister.publicKey,
+        //@ts-ignore
+        tokensPriceFeedsRegistry: priceFeedsRegistryPDA,
+      })
+      .signers([whitelister])
+      .rpc();
+
+    // Get The Price Feeds Registry Data
+    const priceFeedsRegistryData =
+      await program.account.tokenPriceFeedRegistry.fetch(priceFeedsRegistryPDA);
+
+    expect(priceFeedsRegistryData.tokenPriceMapping.length).to.eq(1);
+    expect(priceFeedsRegistryData.tokenPriceMapping[0].tokenMint).to.deep.equal(
+      usdcTokenMint
+    );
+    expect(
+      priceFeedsRegistryData.tokenPriceMapping[0].priceFeedId.toString()
+    ).to.equal(usdcTokenPriceFeedIdHex);
+  });
+
+  // -----------------     BORROWING A TOKEN        ------------------------
+  it("TEST 12:  -----------------------  BORROWING A WHITELISTED USDC TOKEN WITH NATIVE SOL AS COLLATERAL   ---------", async () => {
+    // Get Required PDAs and Accounts
+    // Borrower Need To Have ATA for USDC token
+    const borrower1UsdcATAaddress = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      borrower1,
+      usdcTokenMint,
+      borrower1.publicKey
+    );
+
+    const [globalWhitelistedTokensPDA, globalWhitelistedTokensBump] =
+      PublicKey.findProgramAddressSync(
+        [Buffer.from("all_whitelisted_tokens")],
+        program.programId
+      );
+
+    const [BorrowerPositionCounterPDA, BorrowerPositionCounterBump] =
+      PublicKey.findProgramAddressSync(
+        [Buffer.from("borrowers_position_id_counter")],
+        program.programId
+      );
+
+    const [borrowingTokenEscrowPDA, borrowingTokenEscrowBump] =
+      PublicKey.findProgramAddressSync(
+        [Buffer.from("token_escrow"), usdcTokenMint.toBuffer()],
+        program.programId
+      );
+
+    const usdcTokenVaultAddress = getAssociatedTokenAddressSync(
+      usdcTokenMint,
+      borrowingTokenEscrowPDA,
+      true,
+      TOKEN_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+
+    const [borrower1PositionPDA, borrower1PositionBump] =
+      PublicKey.findProgramAddressSync(
+        [
+          Buffer.from("borrower_position"),
+          borrower1.publicKey.toBuffer(),
+          usdcTokenMint.toBuffer(),
+        ],
+        program.programId
+      );
+
+    const [priceFeedsRegistryPDA, priceFeedsRegistryBump] =
+      PublicKey.findProgramAddressSync(
+        [Buffer.from("price_feed_registry")],
+        program.programId
+      );
+
+    const [solCollateralVaultPDA, solCollateralVaultBump] =
+      PublicKey.findProgramAddressSync(
+        [Buffer.from("sol_collateral_vault")],
+        program.programId
+      );
+
+    // Collateral And Borrowing Token Price Updates
+    const borrowingPriceUpdate = (
+      await priceServiceConnection.getLatestPriceUpdates(
+        [usdcTokenPriceFeedIdHex],
+        { encoding: "base64" }
+      )
+    ).binary.data[0];
+
+    const collateralPriceUpdate = (
+      await priceServiceConnection.getLatestPriceUpdates(
+        [solMintPriceFeedIdHex],
+        { encoding: "base64" }
+      )
+    ).binary.data[0];
+    /*
+    const borrowingPriceUpdateBytes = Buffer.from(
+      borrowingPriceUpdate,
+      "base64"
+    );
+    const collateralPriceUpdateBytes = Buffer.from(
+      collateralPriceUpdate,
+      "base64"
+    );
+
+    // 3. Create keypairs for the price update accounts
+    const borrowingPriceUpdateKeypair = anchor.web3.Keypair.generate();
+    const collateralPriceUpdateKeypair = anchor.web3.Keypair.generate();
+
+    await provider.connection.sendTransaction(
+      new anchor.web3.Transaction().add(
+        anchor.web3.SystemProgram.createAccount({
+          fromPubkey: provider.wallet.publicKey,
+          newAccountPubkey: borrowingPriceUpdateKeypair.publicKey,
+          space: borrowingPriceUpdateBytes.length,
+          lamports: await provider.connection.getMinimumBalanceForRentExemption(
+            borrowingPriceUpdateBytes.length
+          ),
+          programId: program.programId, // Your program ID
+        })
+      ),
+      [provider.wallet.payer, borrowingPriceUpdateKeypair]
+    );
+
+    await provider.connection.sendTransaction(
+      new anchor.web3.Transaction().add(
+        anchor.web3.SystemProgram.createAccount({
+          fromPubkey: provider.wallet.publicKey,
+          newAccountPubkey: collateralPriceUpdateKeypair.publicKey,
+          space: collateralPriceUpdateBytes.length,
+          lamports: await provider.connection.getMinimumBalanceForRentExemption(
+            collateralPriceUpdateBytes.length
+          ),
+          programId: program.programId, // Your program ID
+        })
+      ),
+      [provider.wallet.payer, collateralPriceUpdateKeypair]
+    );
+
+    // 5. Now write the price update data to the accounts
+    const borrowingWriteIx = anchor.web3.SystemProgram.transfer({
+      fromPubkey: provider.wallet.publicKey,
+      toPubkey: borrowingPriceUpdateKeypair.publicKey,
+      lamports: 0,
+    });
+    borrowingWriteIx.data = borrowingPriceUpdateBytes;
+
+    const collateralWriteIx = anchor.web3.SystemProgram.transfer({
+      fromPubkey: provider.wallet.publicKey,
+      toPubkey: collateralPriceUpdateKeypair.publicKey,
+      lamports: 0,
+    });
+    collateralWriteIx.data = collateralPriceUpdateBytes;
+
+    await provider.connection.sendTransaction(
+      new anchor.web3.Transaction()
+        .add(borrowingWriteIx)
+        .add(collateralWriteIx),
+      [provider.wallet.payer]
+    );*/
+
+    // Call The Borrow Token Instruction
+    const borrowingLoanTerms = {
+      interestRate: new BN(700),
+      lendingDuration: new BN(15552000),
+    };
+
+    await program.methods
+      .borrowToken(solMint, usdcTokenMint, new BN(200), borrowingLoanTerms)
+      .accounts({
+        tokenToBorrow: usdcTokenMint,
+        tokenCollateral: solMint,
+        collateralPriceUpdate: collateralPriceUpdate,
+        borrowingPriceUpdate: borrowingPriceUpdate,
+      })
+      .signers([borrower1])
+      .rpc();
   });
 });

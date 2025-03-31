@@ -34,6 +34,16 @@ pub struct AllWhitelistedTokens {
    pub tokens_whitelisted_bump: u8,
 }
 
+/* SOL COLLATERAL PDA VAULT */
+#[account]
+#[derive(InitSpace)]
+pub struct SolCollateralVault {
+   pub vault_bump: u8,
+   pub vault_authority: Pubkey,
+   pub vault_balance: u64,
+   pub is_active: bool,
+}
+
 
 /* Lender Position ID Counter */
 #[account]
@@ -53,17 +63,40 @@ pub struct BorrowerPositionIDCounter {
 }
 
 
-/** An Associated Token Vault To Hold All Lent Tokens */
+/** An Associated Token Escrow To Track All Lent and Borrowed Tokens */
 #[account]
-pub struct LentTokenVault {
+pub struct LentBorrowedTokenEscrow {
 
-   pub lending_token: Pubkey,
+   pub lending_borrowing_token: Pubkey,
    
    pub total_lent_tokens: u64,
+
+   pub total_borrowed_tokens: u64,
 
    pub token_vault_bump: u8,
 
    pub is_active: bool,
+}
+
+
+/* A Registry Mapping of Tokens And Their Price Feed Ids In Hex From Pyth Oracle */
+#[account]
+#[derive(InitSpace)]
+pub struct TokenPriceFeedRegistry {
+   pub authority: Pubkey,
+
+   #[max_len(50)]
+   pub token_price_mapping: Vec<TokenPriceMapping>,// at least 50 tokens
+
+   pub registry_bump: u8,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, InitSpace, PartialEq)]
+pub struct TokenPriceMapping {
+   pub token_mint: Pubkey,
+
+   #[max_len(70)]
+   pub price_feed_id: String,
 }
 
 
@@ -107,4 +140,33 @@ pub struct LoanTerms {
    pub interest_rate: u64,
 
    pub lending_duration: u64,
+}
+
+
+
+/* THE BORROWER POSITION  */
+#[account]
+#[derive(InitSpace)]
+pub struct BorrowerPosition {
+   pub borrowing_token: Pubkey,// 32 bytes
+
+   pub collateral_token: Pubkey,// 32 bytes
+
+   pub collateral_amount: u64,// 8 bytes
+
+   pub borrower_pubkey: Pubkey,
+
+   pub borrowing_amount: u64,// 8 bytes
+
+   pub borrower_position_id: u64,// 8 bytes
+
+   pub borrowing_terms: LoanTerms,// 16 bytes
+
+   pub is_position_active: bool,// 1 byte
+
+   pub is_matched: bool,// 1 byte
+
+   pub borrowing_start: i64,// 8 bytes
+
+   pub borrower_position_bump: u8,// 1 byte
 }

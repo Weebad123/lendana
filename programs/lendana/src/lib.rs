@@ -34,10 +34,10 @@ pub mod lendana {
         Ok(())
     }
 
-    // INITIALIZE THE GLOBAL REGISTRY OF WHITELISTED TOKENS AND POSITION COUNTERS
-    pub fn init_whitelisted_registry_and_counters(ctx: Context<GlobalWhitelistedTokensAndPositionCounters>) -> Result<()> {
+    // INITIALIZE THE GLOBAL REGISTRY OF WHITELISTED TOKENS AND THEIR PRICE FEEDS, AND POSITION COUNTERS
+    pub fn init_registries_and_counters(ctx: Context<GlobalWhitelistedTokensPositionCountersAndPriceRegistry>) -> Result<()> {
 
-        instructions::admin_operations::init_global_tokens_and_counters(ctx)?;
+        instructions::admin_operations::init_tokens_registry_prices_and_counters(ctx)?;
         Ok(())
     }
 
@@ -45,6 +45,13 @@ pub mod lendana {
     pub fn whitelist_token(ctx: Context<WhitelistToken>, token_mint: Pubkey) -> Result<()> {
 
         instructions::admin_operations::token_whitelist(ctx, token_mint)?;
+        Ok(())
+    }
+
+    // AUTHORIZED UPDATER ADDS A PRICE FEED FOR A WHITELISTED TOKEN
+    pub fn add_price(ctx: Context<AddTokenPriceMapping>, token_mint: Pubkey, price_feed_id: String) -> Result<()> {
+
+        instructions::admin_operations::add_token_prices(ctx, token_mint, price_feed_id)?;
         Ok(())
     }
 
@@ -66,6 +73,13 @@ pub mod lendana {
     pub fn cancel_lending_order(ctx: Context<CancelLendingOrder>) -> Result<()> {
 
         instructions::lender_operations::cancel_lending_order(ctx)?;
+        Ok(())
+    }
+
+    // BORROW A TOKEN
+    pub fn borrow_token(ctx: Context<BorrowerPositionInfo>, collateral_token: Pubkey, borrowing_token: Pubkey, borrowing_amount: u64, loan_terms: LoanTerms) -> Result<()> {
+
+        instructions::borrower_operations::create_borrowing_order(ctx, collateral_token, borrowing_token, borrowing_amount, loan_terms)?;
         Ok(())
     }
 }
