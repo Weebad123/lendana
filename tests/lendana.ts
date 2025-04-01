@@ -1,8 +1,9 @@
 import * as anchor from "@coral-xyz/anchor";
-import { Program } from "@coral-xyz/anchor";
+import { Program, Wallet } from "@coral-xyz/anchor";
 import { Lendana } from "../target/types/lendana";
 import {
   Connection,
+  clusterApiUrl,
   Keypair,
   LAMPORTS_PER_SOL,
   PublicKey,
@@ -27,12 +28,22 @@ import { publicKey } from "@coral-xyz/anchor/dist/cjs/utils";
 import { expect } from "chai";
 import { BN } from "bn.js";
 import { HermesClient } from "@pythnetwork/hermes-client";
+import { PythSolanaReceiver } from "@pythnetwork/pyth-solana-receiver";
 
 describe("lendana", () => {
   // Configure the client to use the local cluster.
 
   /** ---------------------     TEST SETUP       -------------------- */
+  /*const connection = new Connection("http://localhost:8899", {
+    commitment: "confirmed",
+    maxSupportedTransactionVersion: 0, // This parameter is required
+  } as any);*/
   const provider = anchor.AnchorProvider.env();
+  /*const provider = new anchor.AnchorProvider(
+    connection,
+    anchor.Wallet.local(),
+    { preflightCommitment: "confirmed" }
+  );*/
   anchor.setProvider(provider);
 
   const program = anchor.workspace.Lendana as Program<Lendana>;
@@ -55,6 +66,9 @@ describe("lendana", () => {
   const borrower1 = anchor.web3.Keypair.generate();
   const borrower2 = anchor.web3.Keypair.generate();
   const borrower3 = anchor.web3.Keypair.generate();
+
+  let connection: Connection;
+  let wallet: Wallet;
 
   // Token Mints In our Testing
   let usdcTokenMint: PublicKey;
@@ -831,17 +845,34 @@ describe("lendana", () => {
       .signers([whitelister])
       .rpc();
 
+    // Add the solMint too
+    await program.methods
+      .addPrice(solMint, solMintPriceFeedIdHex)
+      .accounts({
+        whitelister: whitelister.publicKey,
+        //@ts-ignore
+        tokensPriceFeedRegistry: priceFeedsRegistryPDA,
+      })
+      .signers([whitelister])
+      .rpc();
+
     // Get The Price Feeds Registry Data
     const priceFeedsRegistryData =
       await program.account.tokenPriceFeedRegistry.fetch(priceFeedsRegistryPDA);
 
-    expect(priceFeedsRegistryData.tokenPriceMapping.length).to.eq(1);
+    expect(priceFeedsRegistryData.tokenPriceMapping.length).to.eq(2);
     expect(priceFeedsRegistryData.tokenPriceMapping[0].tokenMint).to.deep.equal(
       usdcTokenMint
     );
     expect(
       priceFeedsRegistryData.tokenPriceMapping[0].priceFeedId.toString()
     ).to.equal(usdcTokenPriceFeedIdHex);
+    expect(priceFeedsRegistryData.tokenPriceMapping[1].tokenMint).to.deep.equal(
+      solMint
+    );
+    expect(
+      priceFeedsRegistryData.tokenPriceMapping[1].priceFeedId.toString()
+    ).to.equal(solMintPriceFeedIdHex);
   });
 
   // -----------------     BORROWING A TOKEN        ------------------------
@@ -903,101 +934,84 @@ describe("lendana", () => {
         program.programId
       );
 
-    // Collateral And Borrowing Token Price Updates
-    const borrowingPriceUpdate = (
-      await priceServiceConnection.getLatestPriceUpdates(
-        [usdcTokenPriceFeedIdHex],
-        { encoding: "base64" }
-      )
-    ).binary.data[0];
-
-    const collateralPriceUpdate = (
-      await priceServiceConnection.getLatestPriceUpdates(
-        [solMintPriceFeedIdHex],
-        { encoding: "base64" }
-      )
-    ).binary.data[0];
-    /*
-    const borrowingPriceUpdateBytes = Buffer.from(
-      borrowingPriceUpdate,
-      "base64"
-    );
-    const collateralPriceUpdateBytes = Buffer.from(
-      collateralPriceUpdate,
-      "base64"
-    );
-
-    // 3. Create keypairs for the price update accounts
-    const borrowingPriceUpdateKeypair = anchor.web3.Keypair.generate();
-    const collateralPriceUpdateKeypair = anchor.web3.Keypair.generate();
-
-    await provider.connection.sendTransaction(
-      new anchor.web3.Transaction().add(
-        anchor.web3.SystemProgram.createAccount({
-          fromPubkey: provider.wallet.publicKey,
-          newAccountPubkey: borrowingPriceUpdateKeypair.publicKey,
-          space: borrowingPriceUpdateBytes.length,
-          lamports: await provider.connection.getMinimumBalanceForRentExemption(
-            borrowingPriceUpdateBytes.length
-          ),
-          programId: program.programId, // Your program ID
-        })
-      ),
-      [provider.wallet.payer, borrowingPriceUpdateKeypair]
-    );
-
-    await provider.connection.sendTransaction(
-      new anchor.web3.Transaction().add(
-        anchor.web3.SystemProgram.createAccount({
-          fromPubkey: provider.wallet.publicKey,
-          newAccountPubkey: collateralPriceUpdateKeypair.publicKey,
-          space: collateralPriceUpdateBytes.length,
-          lamports: await provider.connection.getMinimumBalanceForRentExemption(
-            collateralPriceUpdateBytes.length
-          ),
-          programId: program.programId, // Your program ID
-        })
-      ),
-      [provider.wallet.payer, collateralPriceUpdateKeypair]
-    );
-
-    // 5. Now write the price update data to the accounts
-    const borrowingWriteIx = anchor.web3.SystemProgram.transfer({
-      fromPubkey: provider.wallet.publicKey,
-      toPubkey: borrowingPriceUpdateKeypair.publicKey,
-      lamports: 0,
-    });
-    borrowingWriteIx.data = borrowingPriceUpdateBytes;
-
-    const collateralWriteIx = anchor.web3.SystemProgram.transfer({
-      fromPubkey: provider.wallet.publicKey,
-      toPubkey: collateralPriceUpdateKeypair.publicKey,
-      lamports: 0,
-    });
-    collateralWriteIx.data = collateralPriceUpdateBytes;
-
-    await provider.connection.sendTransaction(
-      new anchor.web3.Transaction()
-        .add(borrowingWriteIx)
-        .add(collateralWriteIx),
-      [provider.wallet.payer]
-    );*/
-
     // Call The Borrow Token Instruction
     const borrowingLoanTerms = {
       interestRate: new BN(700),
       lendingDuration: new BN(15552000),
     };
 
-    await program.methods
-      .borrowToken(solMint, usdcTokenMint, new BN(200), borrowingLoanTerms)
-      .accounts({
-        tokenToBorrow: usdcTokenMint,
-        tokenCollateral: solMint,
-        collateralPriceUpdate: collateralPriceUpdate,
-        borrowingPriceUpdate: borrowingPriceUpdate,
-      })
-      .signers([borrower1])
-      .rpc();
+    //Collateral And Borrowing Token Price Updates
+    const borrowingPriceUpdate = (
+      await priceServiceConnection.getLatestPriceUpdates(
+        [usdcTokenPriceFeedIdHex],
+        { encoding: "base64" }
+      )
+    ).binary.data;
+
+    const collateralPriceUpdate = (
+      await priceServiceConnection.getLatestPriceUpdates(
+        [solMintPriceFeedIdHex],
+        { encoding: "base64" }
+      )
+    ).binary.data;
+
+    // Post Price Update To Solana
+    const pythSolanaReceiver = new PythSolanaReceiver({
+      connection: provider.connection,
+
+      wallet: provider.wallet as any,
+    });
+    // Create transaction builder
+    const transactionBuilder = pythSolanaReceiver.newTransactionBuilder({
+      closeUpdateAccounts: false,
+    });
+    // Add Both Price Updates To The Builder
+    await transactionBuilder.addPostPriceUpdates([
+      ...borrowingPriceUpdate,
+      ...collateralPriceUpdate,
+    ]);
+
+    // Add Borrow instruction to the same transaction
+    await transactionBuilder.addPriceConsumerInstructions(
+      async (getPriceUpdateAccount) => {
+        const borrowingPriceAccount = getPriceUpdateAccount(
+          usdcTokenPriceFeedIdHex
+        );
+        const collateralPriceAccount = getPriceUpdateAccount(
+          solMintPriceFeedIdHex
+        );
+
+        // Create your instruction with these accounts
+        const borrowTokenIx = await program.methods
+          .borrowToken(solMint, usdcTokenMint, new BN(200), borrowingLoanTerms)
+          .accounts({
+            borrower: borrower1.publicKey,
+            tokenToBorrow: usdcTokenMint,
+            tokenCollateral: solMint,
+            collateralPriceUpdate: collateralPriceAccount,
+            borrowingPriceUpdate: borrowingPriceAccount,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            //@ts-ignore
+            systemProgram: SystemProgram.programId,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          })
+          .signers([borrower1])
+          .instruction();
+
+        return [
+          {
+            instruction: borrowTokenIx,
+            signers: [borrower1],
+          },
+        ];
+      }
+    );
+    // Send the transactions
+    await pythSolanaReceiver.provider.sendAll(
+      await transactionBuilder.buildVersionedTransactions({
+        computeUnitPriceMicroLamports: 5000,
+      }),
+      { skipPreflight: true }
+    );
   });
 });
