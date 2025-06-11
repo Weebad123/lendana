@@ -18,7 +18,7 @@ pub fn modify_lender_position(ctx: Context<ModifyLenderPosition>, new_loan_terms
     // First Ensure Lending Order Is Not Matched
     require!(lender_position.is_matched == false, LendanaError::OrderAlreadyMatched);
 
-    // If Modifying Loan Terms, Then We Validated The New Loan Terms. If Not, We Just Skip because of previous validation
+    // If Modifying Loan Terms, Then We Validate The New Loan Terms. If Not, We Just Skip because of previous validation
     if lender_position.lending_terms != new_loan_terms {
         validate_loan_terms::validate_loan(new_loan_terms)?;
     }

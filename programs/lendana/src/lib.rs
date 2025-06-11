@@ -63,14 +63,14 @@ pub mod lendana {
     }
 
     // MODIFY LENDER POSITION
-    pub fn modify_lender_position(ctx: Context<ModifyLenderPosition>, new_loan_terms: LoanTerms, add_lending_amount: u64) -> Result<()> {
+    pub fn update_lender_position(ctx: Context<ModifyLenderPosition>, new_loan_terms: LoanTerms, add_lending_amount: u64) -> Result<()> {
 
         instructions::lender_operations::modify_lender_position(ctx, new_loan_terms, add_lending_amount)?;
         Ok(())
     }
 
     // CANCEL LENDING ORDER
-    pub fn cancel_lending_order(ctx: Context<CancelLendingOrder>) -> Result<()> {
+    pub fn cancel_lend_order(ctx: Context<CancelLendingOrder>) -> Result<()> {
 
         instructions::lender_operations::cancel_lending_order(ctx)?;
         Ok(())
@@ -80,6 +80,20 @@ pub mod lendana {
     pub fn borrow_token(ctx: Context<BorrowerPositionInfo>, collateral_token: Pubkey, borrowing_token: Pubkey, borrowing_amount: u64, loan_terms: LoanTerms) -> Result<()> {
 
         instructions::borrower_operations::create_borrowing_order(ctx, collateral_token, borrowing_token, borrowing_amount, loan_terms)?;
+        Ok(())
+    }
+
+    // MODIFY BORROWER POSITION
+    pub fn update_borrower_position(ctx: Context<ModifyBorrowerPosition>, new_borrowing_terms: LoanTerms, additional_borrow_amount: u64) -> Result<()> {
+
+        instructions::borrower_operations::modify_borrowing_order(ctx, new_borrowing_terms, additional_borrow_amount)?;
+        Ok(())
+    }
+
+    // CANCEL BORROW ORDER
+    pub fn cancel_borrow_order(ctx: Context<CancelBorrowOrder>) -> Result<()> {
+
+        instructions::borrower_operations::cancel_borrowing_order(ctx)?;
         Ok(())
     }
 }

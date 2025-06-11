@@ -33,8 +33,14 @@ pub enum LendanaError {
     #[msg("Only Owning Lender Can Call Function")]
     UnauthorizedLender,
 
+    #[msg("Only Owning Borrower Can Modify Position")]
+    UnauthorizedBorrower,
+
     #[msg("Insufficient Lent Tokens In Vault")]
     InsufficientLentTokens,
+
+    #[msg("Insufficient Borrowed Tokens In Vault")]
+    InsufficientBorrowedTokens,
 
     #[msg("Lending Order Has Not Been Matched Yet")]
     OrderNotMatched,

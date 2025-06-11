@@ -1,4 +1,5 @@
 [toolchain]
+anchor_version = "0.31.0"
 
 [features]
 resolution = true
@@ -11,7 +12,7 @@ lendana = "9KGSxvbEghBVBN2GF1KWb64r9Z7tjnCWFW1eSFVCK9hu"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Localnet"
+cluster = "http://127.0.0.1:8899"
 wallet = "./turbin3-wallet.json"
 
 [scripts]

@@ -28,7 +28,11 @@ import { publicKey } from "@coral-xyz/anchor/dist/cjs/utils";
 import { expect } from "chai";
 import { BN } from "bn.js";
 import { HermesClient } from "@pythnetwork/hermes-client";
-import { PythSolanaReceiver } from "@pythnetwork/pyth-solana-receiver";
+import {
+  PythSolanaReceiver,
+  DEFAULT_RECEIVER_PROGRAM_ID,
+} from "@pythnetwork/pyth-solana-receiver";
+import { sendTransactions } from "@pythnetwork/solana-utils";
 
 describe("lendana", () => {
   // Configure the client to use the local cluster.
@@ -57,6 +61,20 @@ describe("lendana", () => {
     {}
   );
 
+  const PYTH_PROGRAM_ID = new PublicKey("rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ");
+  /*
+  const connection = new anchor.web3.Connection(
+    "https://api.devnet.solana.com"
+  );
+  const provider = new anchor.AnchorProvider(
+    connection,
+    anchor.Wallet.local(),
+    {
+      commitment: "confirmed",
+    }
+  );
+  anchor.setProvider(provider);*/
+
   // Actors In The System
   const deployer = provider.wallet;
   const lendanaAdmin = anchor.web3.Keypair.generate();
@@ -66,9 +84,10 @@ describe("lendana", () => {
   const borrower1 = anchor.web3.Keypair.generate();
   const borrower2 = anchor.web3.Keypair.generate();
   const borrower3 = anchor.web3.Keypair.generate();
-
+  /*
   let connection: Connection;
   let wallet: Wallet;
+*/
 
   // Token Mints In our Testing
   let usdcTokenMint: PublicKey;
@@ -391,21 +410,21 @@ describe("lendana", () => {
       lender1.publicKey
     );
 
-    const lenderUsdcToken = await mintTo(
-      provider.connection,
-      lender1,
-      usdcTokenMint,
-      lender1ATAaddress.address,
-      whitelister.publicKey,
-      500 * 10 ** 6,
-      [whitelister]
-    );
-
     const lender2ATAaddress = await getOrCreateAssociatedTokenAccount(
       provider.connection,
       lender2,
       usdcTokenMint,
       lender2.publicKey
+    );
+
+    const lender1UsdcToken = await mintTo(
+      provider.connection,
+      lender1,
+      usdcTokenMint,
+      lender1ATAaddress.address,
+      whitelister.publicKey,
+      700 * 10 ** 6,
+      [whitelister]
     );
 
     const lender2UsdcToken = await mintTo(
@@ -690,7 +709,7 @@ describe("lendana", () => {
 
     // Let's Call The Modify Lender Position instruction
     await program.methods
-      .modifyLenderPosition(newLoanTerms, new BN(35 * 10 ** 6))
+      .updateLenderPosition(newLoanTerms, new BN(35 * 10 ** 6))
       .accounts({
         lender: lender1.publicKey,
         tokenToLend: usdcTokenMint,
@@ -781,7 +800,7 @@ describe("lendana", () => {
 
     // Let's call the Cancel Order Instruction
     await program.methods
-      .cancelLendingOrder()
+      .cancelLendOrder()
       .accounts({
         lender: lender2.publicKey,
         tokenToLend: usdcTokenMint,
@@ -955,6 +974,10 @@ describe("lendana", () => {
       )
     ).binary.data;
 
+    // All Price Updates
+    const allPriceUpdates = [...borrowingPriceUpdate, ...collateralPriceUpdate];
+
+
     // Post Price Update To Solana
     const pythSolanaReceiver = new PythSolanaReceiver({
       connection: provider.connection,
@@ -966,10 +989,7 @@ describe("lendana", () => {
       closeUpdateAccounts: false,
     });
     // Add Both Price Updates To The Builder
-    await transactionBuilder.addPostPriceUpdates([
-      ...borrowingPriceUpdate,
-      ...collateralPriceUpdate,
-    ]);
+    await transactionBuilder.addPostPriceUpdates(allPriceUpdates);
 
     // Add Borrow instruction to the same transaction
     await transactionBuilder.addPriceConsumerInstructions(
@@ -994,6 +1014,7 @@ describe("lendana", () => {
             //@ts-ignore
             systemProgram: SystemProgram.programId,
             associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            pythProgram: DEFAULT_RECEIVER_PROGRAM_ID,
           })
           .signers([borrower1])
           .instruction();
@@ -1006,12 +1027,26 @@ describe("lendana", () => {
         ];
       }
     );
+
+    // Build the transactions with explicit compute budget
+const transactions = await transactionBuilder.buildVersionedTransactions({
+  computeUnitPriceMicroLamports: 100000,  // Higher value from example
+  tightComputeBudget: true,               // Added from example
+});
     // Send the transactions
-    await pythSolanaReceiver.provider.sendAll(
-      await transactionBuilder.buildVersionedTransactions({
-        computeUnitPriceMicroLamports: 5000,
-      }),
-      { skipPreflight: true }
-    );
+    try {
+  console.log(`Sending ${transactions.length} transaction(s)...`);
+  await pythSolanaReceiver.provider.sendAll(
+    transactions,
+    { skipPreflight: false }
+  );
+  console.log("Transactions sent successfully");
+} catch (error) {
+  console.error("Transaction error:", error);
+  if (error.logs) {
+    console.error("Transaction logs:", error.logs);
+  }
+  throw error;
+}
   });
 });
